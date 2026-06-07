@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Monitoraggio Peso Cloud</title>
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body class="bg-gray-50 text-gray-800 min-h-screen font-sans">
+
+    <div class="max-w-6xl mx-auto px-4 py-8">
+        <header class="mb-8 text-center">
+            <h1 class="text-3xl font-bold text-blue-600">Monitoraggio Peso Cloud</h1>
+            <p class="text-gray-500 mt-2">I tuoi dati sono sincronizzati online su tutti i tuoi dispositivi.</p>
+        </header>
+
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+            
+            <section class="bg-white p-6 rounded-xl shadow-md h-fit">
+                <h2 class="text-xl font-semibold mb-4 text-gray-700 border-b pb-2">Registra Peso</h2>
+                <form id="weightForm" class="space-y-4">
+                    <div>
+                        <label for="dateInput" class="block text-sm font-medium text-gray-600 mb-1">Data</label>
+                        <input type="date" id="dateInput" required 
+                            class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    </div>
+                    <div>
+                        <label for="weightInput" class="block text-sm font-medium text-gray-600 mb-1">Peso (kg)</label>
+                        <input type="number" id="weightInput" step="0.1" min="0.1" placeholder="es. 72.5" required
+                            class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    </div>
+                    <button type="submit" 
+                        class="w-full bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 px-4 rounded-lg transition duration-200">
+                        Registra Peso
+                    </button>
+                </form>
+            </section>
+
+            <section class="lg:col-span-2 bg-white p-6 rounded-xl shadow-md">
+                <h2 class="text-xl font-semibold mb-4 text-gray-700 border-b pb-2">Andamento Temporale</h2>
+                <div class="relative w-full h-64 md:h-80 flex items-center justify-center">
+                    <canvas id="weightChart"></canvas>
+                </div>
+            </section>
+
+        </div>
+
+        <section class="mt-8 bg-white p-6 rounded-xl shadow-md">
+            <h2 class="text-xl font-semibold mb-4 text-gray-700 border-b pb-2">Cronologia Inserimenti</h2>
+            <div class="overflow-x-auto">
+                <table class="w-full text-left border-collapse">
+                    <thead>
+                        <tr class="bg-gray-100 text-gray-600 text-sm uppercase tracking-wider">
+                            <th class="py-3 px-4 border-b">Data</th>
+                            <th class="py-3 px-4 border-b">Peso (kg)</th>
+                            <th class="py-3 px-4 border-b text-right">Azione</th>
+                        </tr>
+                    </thead>
+                    <tbody id="historyTableBody" class="divide-y divide-gray-200">
+                        </tbody>
+                </table>
+            </div>
+            <div id="statusState" class="text-center py-8 text-gray-500">
+                Connessione al database cloud in corso...
+            </div>
+        </section>
+    </div>
+
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
+        import { getFirestore, collection, doc, setDoc, deleteDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+
+        // ==========================================
+        // ⚠️ INCOLLA SOTTO IL TUO CONFIG DI FIREBASE
+        // ==========================================
+ 
+
+	const firebaseConfig = {
+  	apiKey: "AIzaSyA10LxfhhWXjWZMvKu8us8PJEaIiP8LFhE",
+  	authDomain: "peso-cloud-personale.firebaseapp.com",
+  	projectId: "peso-cloud-personale",
+  	storageBucket: "peso-cloud-personale.firebasestorage.app",
+  	messagingSenderId: "696917853011",
+  	appId: "1:696917853011:web:9fe6738205b18b723e57a6"
+	};
+
+        // Inizializza Firebase e Firestore
+        const app = initializeApp(firebaseConfig);
+        const db = getFirestore(app);
+        const weightCollection = collection(db, "weights");
+
+        // Stato locale
+        let weightRecords = [];
+        let weightChart = null;
+
+        // Elementi DOM
+        const weightForm = document.getElementById('weightForm');
+        const dateInput = document.getElementById('dateInput');
+        const weightInput = document.getElementById('weightInput');
+        const historyTableBody = document.getElementById('historyTableBody');
+        const statusState = document.getElementById('statusState');
+        const ctx = document.getElementById('weightChart').getContext('2d');
+
+        // Imposta la data odierna
+        const today = new Date().toISOString().split('T')[0];
+        dateInput.value = today;
+
+        // Grafico Chart.js
+        weightChart = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: [],
+                datasets: [{
+                    label: 'Peso (kg)',
+                    data: [],
+                    borderColor: '#2563eb',
+                    backgroundColor: 'rgba(37, 99, 235, 0.1)',
+                    borderWidth: 2,
+                    tension: 0.1,
+                    fill: true
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    x: { grid: { display: false } },
+                    y: { beginAtZero: false, title: { display: true, text: 'kg' } }
+                }
+            }
+        });
+
+        // Ascolto dati Cloud in tempo reale
+        onSnapshot(weightCollection, (snapshot) => {
+            weightRecords = [];
+            snapshot.forEach((doc) => {
+                weightRecords.push(doc.data());
+            });
+            updateUI();
+        });
+
+        function updateUI() {
+            const chronologicalRecords = [...weightRecords].sort((a, b) => new Date(a.date) - new Date(b.date));
+            const recentRecords = [...weightRecords].sort((a, b) => new Date(b.date) - new Date(a.date));
+
+            weightChart.data.labels = chronologicalRecords.map(r => formatDate(r.date));
+            weightChart.data.datasets[0].data = chronologicalRecords.map(r => r.weight);
+            weightChart.update();
+
+            historyTableBody.innerHTML = '';
+            if (recentRecords.length === 0) {
+                statusState.textContent = "Nessun dato registrato sul cloud. Inserisci il tuo primo peso!";
+                statusState.classList.remove('hidden');
+            } else {
+                statusState.classList.add('hidden');
+                recentRecords.forEach(record => {
+                    const row = document.createElement('tr');
+                    row.className = 'hover:bg-gray-50';
+                    row.innerHTML = `
+                        <td class="py-3 px-4 border-b text-sm font-medium text-gray-700">${formatDate(record.date)}</td>
+                        <td class="py-3 px-4 border-b text-sm text-gray-600">${record.weight.toFixed(1)} kg</td>
+                        <td class="py-3 px-4 border-b text-sm text-right">
+                            <button data-date="${record.date}" class="delete-btn text-red-600 hover:text-red-800 font-medium transition duration-150">
+                                Elimina
+                            </button>
+                        </td>
+                    `;
+                    historyTableBody.appendChild(row);
+                });
+
+                document.querySelectorAll('.delete-btn').forEach(btn => {
+                    btn.addEventListener('click', (e) => {
+                        const dateToDelete = e.target.getAttribute('data-date');
+                        deleteRecord(dateToDelete);
+                    });
+                });
+            }
+        }
+
+        function formatDate(dateString) {
+            const [year, month, day] = dateString.split('-');
+            return `${day}/${month}/${year}`;
+        }
+
+        // Scrittura sul Cloud
+        weightForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const date = dateInput.value;
+            const weight = parseFloat(weightInput.value);
+
+            if (isNaN(weight) || weight <= 0) return;
+
+            const existing = weightRecords.find(r => r.date === date);
+            if (existing) {
+                const confirmOverwrite = confirm(`Esiste già un record per il ${formatDate(date)}. Vuoi sovrascriverlo?`);
+                if (!confirmOverwrite) return;
+            }
+
+            try {
+                await setDoc(doc(db, "weights", date), { date, weight });
+                weightInput.value = '';
+            } catch (error) {
+                alert("Errore cloud: " + error.message);
+            }
+        });
+
+        // Eliminazione dal Cloud
+        async function deleteRecord(date) {
+            if (confirm(`Eliminare la registrazione del ${formatDate(date)}?`)) {
+                try {
+                    await deleteDoc(doc(db, "weights", date));
+                } catch (error) {
+                    alert("Errore cloud: " + error.message);
+                }
+            }
+        }
+    </script>
+</body>
+</html>
