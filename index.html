@@ -6,18 +6,50 @@
     <title>Monitoraggio Peso Cloud</title>
     <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    
+    <style>
+        @media print {
+            /* Nasconde gli elementi interattivi che non servono su carta */
+            #inputSection, .delete-btn, #btnPrint {
+                display: none !important;
+            }
+            /* Forza il layout a larghezza intera per grafico e tabella */
+            .grid {
+                display: block !important;
+            }
+            #chartSection {
+                width: 100% !important;
+                page-break-inside: avoid;
+                margin-bottom: 2rem;
+            }
+            body {
+                background-color: #ffffff !important;
+                color: #000000 !important;
+            }
+            /* Assicura che i colori del grafico vengano stampati correttamente */
+            body {
+                -webkit-print-color-adjust: exact;
+                print-color-adjust: exact;
+            }
+        }
+    </style>
 </head>
 <body class="bg-gray-50 text-gray-800 min-h-screen font-sans">
 
     <div class="max-w-6xl mx-auto px-4 py-8">
-        <header class="mb-8 text-center">
+        <header class="mb-8 text-center relative">
             <h1 class="text-3xl font-bold text-blue-600">Monitoraggio Peso Cloud</h1>
             <p class="text-gray-500 mt-2">I tuoi dati sono sincronizzati online su tutti i tuoi dispositivi.</p>
+            
+            <button id="btnPrint" onclick="window.print()" 
+                class="mt-4 inline-flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white font-medium py-2 px-4 rounded-lg transition duration-200 shadow-md">
+                🖨️ Stampa Report
+            </button>
         </header>
 
         <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
             
-            <section class="bg-white p-6 rounded-xl shadow-md h-fit">
+            <section id="inputSection" class="bg-white p-6 rounded-xl shadow-md h-fit">
                 <h2 class="text-xl font-semibold mb-4 text-gray-700 border-b pb-2">Registra Peso</h2>
                 <form id="weightForm" class="space-y-4">
                     <div>
@@ -37,7 +69,7 @@
                 </form>
             </section>
 
-            <section class="lg:col-span-2 bg-white p-6 rounded-xl shadow-md">
+            <section id="chartSection" class="lg:col-span-2 bg-white p-6 rounded-xl shadow-md">
                 <h2 class="text-xl font-semibold mb-4 text-gray-700 border-b pb-2">Andamento Temporale</h2>
                 <div class="relative w-full h-64 md:h-80 flex items-center justify-center">
                     <canvas id="weightChart"></canvas>
@@ -54,11 +86,11 @@
                         <tr class="bg-gray-100 text-gray-600 text-sm uppercase tracking-wider">
                             <th class="py-3 px-4 border-b">Data</th>
                             <th class="py-3 px-4 border-b">Peso (kg)</th>
-                            <th class="py-3 px-4 border-b text-right">Azione</th>
+                            <th class="py-3 px-4 border-b text-right delete-btn">Azione</th>
                         </tr>
                     </thead>
                     <tbody id="historyTableBody" class="divide-y divide-gray-200">
-                        </tbody>
+                    </tbody>
                 </table>
             </div>
             <div id="statusState" class="text-center py-8 text-gray-500">
@@ -71,19 +103,14 @@
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
         import { getFirestore, collection, doc, setDoc, deleteDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 
-        // ==========================================
-        // ⚠️ INCOLLA SOTTO IL TUO CONFIG DI FIREBASE
-        // ==========================================
- 
-
-	const firebaseConfig = {
-  	apiKey: "AIzaSyA10LxfhhWXjWZMvKu8us8PJEaIiP8LFhE",
-  	authDomain: "peso-cloud-personale.firebaseapp.com",
-  	projectId: "peso-cloud-personale",
-  	storageBucket: "peso-cloud-personale.firebasestorage.app",
-  	messagingSenderId: "696917853011",
-  	appId: "1:696917853011:web:9fe6738205b18b723e57a6"
-	};
+        const firebaseConfig = {
+            apiKey: "AIzaSyA10LxfhhWXjWZMvKu8us8PJEaIiP8LFhE",
+            authDomain: "peso-cloud-personale.firebaseapp.com",
+            projectId: "peso-cloud-personale",
+            storageBucket: "peso-cloud-personale.firebasestorage.app",
+            messagingSenderId: "696917853011",
+            appId: "1:696917853011:web:9fe6738205b18b723e57a6"
+        };
 
         // Inizializza Firebase e Firestore
         const app = initializeApp(firebaseConfig);
@@ -160,7 +187,7 @@
                     row.innerHTML = `
                         <td class="py-3 px-4 border-b text-sm font-medium text-gray-700">${formatDate(record.date)}</td>
                         <td class="py-3 px-4 border-b text-sm text-gray-600">${record.weight.toFixed(1)} kg</td>
-                        <td class="py-3 px-4 border-b text-sm text-right">
+                        <td class="py-3 px-4 border-b text-sm text-right delete-btn">
                             <button data-date="${record.date}" class="delete-btn text-red-600 hover:text-red-800 font-medium transition duration-150">
                                 Elimina
                             </button>
@@ -169,9 +196,9 @@
                     historyTableBody.appendChild(row);
                 });
 
-                document.querySelectorAll('.delete-btn').forEach(btn => {
+                document.querySelectorAll('.delete-btn button').forEach(btn => {
                     btn.addEventListener('click', (e) => {
-                        const dateToDelete = e.target.getAttribute('data-date');
+                        const dateToDelete = e.target.closest('button').getAttribute('data-date');
                         deleteRecord(dateToDelete);
                     });
                 });
