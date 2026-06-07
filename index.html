@@ -26,12 +26,15 @@
             #chartWrapper {
                 height: 500px !important; 
             }
-            /* Riduce ulteriormente la dimensione del testo della tabella in stampa */
+            /* Rende la tabella estremamente compatta in fase di stampa */
             #historyTable {
                 font-size: 10px !important;
             }
             #historyTable th, #historyTable td {
-                padding: 4px 6px !important;
+                padding-top: 4px !important;
+                padding-bottom: 4px !important;
+                padding-left: 6px !important;
+                padding-right: 6px !important;
             }
             body {
                 background-color: #ffffff !important;
@@ -102,7 +105,7 @@
                         </tr>
                     </thead>
                     <tbody id="historyTableBody" class="divide-y divide-gray-200 text-sm">
-                        </tbody>
+                    </tbody>
                 </table>
             </div>
             <div id="statusState" class="text-center py-8 text-gray-500">
@@ -124,12 +127,158 @@
             appId: "1:696917853011:web:9fe6738205b18b723e57a6"
         };
 
+        // Inizializza Firebase e Firestore
         const app = initializeApp(firebaseConfig);
         const db = getFirestore(app);
         const weightCollection = collection(db, "weights");
 
+        // Stato locale
         let weightRecords = [];
         let weightChart = null;
 
+        // Elementi DOM
         const weightForm = document.getElementById('weightForm');
         const dateInput = document.getElementById('dateInput');
+        const weightInput = document.getElementById('weightInput');
+        const historyTableBody = document.getElementById('historyTableBody');
+        const statusState = document.getElementById('statusState');
+        const ctx = document.getElementById('weightChart').getContext('2d');
+
+        // Imposta la data odierna
+        const today = new Date().toISOString().split('T')[0];
+        dateInput.value = today;
+
+        // Grafico Chart.js
+        weightChart = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: [],
+                datasets: [{
+                    label: 'Peso (kg)',
+                    data: [],
+                    borderColor: '#2563eb',
+                    backgroundColor: 'rgba(37, 99, 235, 0.1)',
+                    borderWidth: 2,
+                    tension: 0.1,
+                    fill: true
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    x: { grid: { display: false } },
+                    y: { beginAtZero: false, title: { display: true, text: 'kg' } }
+                }
+            }
+        });
+
+        // Ascolto dati Cloud in tempo reale
+        onSnapshot(weightCollection, (snapshot) => {
+            weightRecords = [];
+            snapshot.forEach((doc) => {
+                weightRecords.push(doc.data());
+            });
+            updateUI();
+        });
+
+        function updateUI() {
+            const chronologicalRecords = [...weightRecords].sort((a, b) => new Date(a.date) - new Date(b.date));
+            const recentRecords = [...weightRecords].sort((a, b) => new Date(b.date) - new Date(a.date));
+
+            weightChart.data.labels = chronologicalRecords.map(r => formatDate(r.date));
+            weightChart.data.datasets[0].data = chronologicalRecords.map(r => r.weight);
+            weightChart.update();
+
+            historyTableBody.innerHTML = '';
+            if (recentRecords.length === 0) {
+                statusState.textContent = "Nessun dato registrato sul cloud. Inserisci il tuo primo peso!";
+                statusState.classList.remove('hidden');
+            } else {
+                statusState.classList.add('hidden');
+                
+                // Distribuzione dei dati accoppiando i record a due a due su 4 colonne
+                for (let i = 0; i < recentRecords.length; i += 2) {
+                    const rec1 = recentRecords[i];
+                    const rec2 = recentRecords[i + 1];
+
+                    const row = document.createElement('tr');
+                    row.className = 'divide-x divide-gray-200 hover:bg-gray-50';
+                    
+                    let rowContent = `
+                        <td class="py-1.5 px-3 font-medium text-gray-700 whitespace-nowrap">
+                            ${formatDate(rec1.date)}
+                            <button data-date="${rec1.date}" class="delete-btn text-xs text-red-500 hover:text-red-700 ml-1.5 font-normal no-print">[X]</button>
+                        </td>
+                        <td class="py-1.5 px-3 text-gray-600 font-mono">${rec1.weight.toFixed(1)} kg</td>
+                    `;
+
+                    if (rec2) {
+                        rowContent += `
+                            <td class="py-1.5 px-3 font-medium text-gray-700 whitespace-nowrap">
+                                ${formatDate(rec2.date)}
+                                <button data-date="${rec2.date}" class="delete-btn text-xs text-red-500 hover:text-red-700 ml-1.5 font-normal no-print">[X]</button>
+                            </td>
+                            <td class="py-1.5 px-3 text-gray-600 font-mono">${rec2.weight.toFixed(1)} kg</td>
+                        `;
+                    } else {
+                        rowContent += `
+                            <td class="py-1.5 px-3 bg-gray-50/50"></td>
+                            <td class="py-1.5 px-3 bg-gray-50/50"></td>
+                        `;
+                    }
+
+                    row.innerHTML = rowContent;
+                    historyTableBody.appendChild(row);
+                }
+
+                // Collegamento eventi di eliminazione per i bottoni dinamici [X]
+                document.querySelectorAll('.delete-btn').forEach(btn => {
+                    btn.addEventListener('click', (e) => {
+                        const dateToDelete = e.target.getAttribute('data-date');
+                        deleteRecord(dateToDelete);
+                    });
+                });
+            }
+        }
+
+        function formatDate(dateString) {
+            const [year, month, day] = dateString.split('-');
+            return `${day}/${month}/${year}`;
+        }
+
+        // Scrittura sul Cloud
+        weightForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const date = dateInput.value;
+            const weight = parseFloat(weightInput.value);
+
+            if (isNaN(weight) || weight <= 0) return;
+
+            const existing = weightRecords.find(r => r.date === date);
+            if (existing) {
+                const confirmOverwrite = confirm(`Esiste già un record per il ${formatDate(date)}. Vuoi sovrascriverlo?`);
+                if (!confirmOverwrite) return;
+            }
+
+            try {
+                await setDoc(doc(db, "weights", date), { date, weight });
+                weightInput.value = '';
+            } catch (error) {
+                alert("Errore cloud: " + error.message);
+            }
+        });
+
+        // Eliminazione dal Cloud
+        async function deleteRecord(date) {
+            if (confirm(`Eliminare la registrazione del ${formatDate(date)}?`)) {
+                try {
+                    await deleteDoc(doc(db, "weights", date));
+                } catch (error) {
+                    alert("Errore cloud: " + error.message);
+                }
+            }
+        }
+    </script>
+</body>
+</html>
