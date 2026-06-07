@@ -4,14 +4,13 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Monitoraggio Peso Cloud</title>
-    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
     
     <style>
         @media print {
             /* Nasconde gli elementi interattivi che non servono su carta */
-            .no-print, #inputSection, #syncSection, .delete-btn {
+            #inputSection, .delete-btn, #btnPrint {
                 display: none !important;
             }
             /* Forza il layout a larghezza intera per grafico e tabella */
@@ -26,6 +25,9 @@
             body {
                 background-color: #ffffff !important;
                 color: #000000 !important;
+            }
+            /* Assicura che i colori del grafico vengano stampati correttamente */
+            body {
                 -webkit-print-color-adjust: exact;
                 print-color-adjust: exact;
             }
@@ -37,22 +39,13 @@
     <div class="max-w-6xl mx-auto px-4 py-8">
         <header class="mb-8 text-center relative">
             <h1 class="text-3xl font-bold text-blue-600">Monitoraggio Peso Cloud</h1>
-            <p class="text-gray-500 mt-2">Dati personali sincronizzati. ID Utente: <span id="userIdDisplay" class="font-mono font-bold text-blue-800"></span></p>
+            <p class="text-gray-500 mt-2">I tuoi dati sono sincronizzati online su tutti i tuoi dispositivi.</p>
             
             <button id="btnPrint" onclick="window.print()" 
-                class="no-print mt-4 inline-flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white font-medium py-2 px-4 rounded-lg transition duration-200 shadow-md">
+                class="mt-4 inline-flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white font-medium py-2 px-4 rounded-lg transition duration-200 shadow-md">
                 🖨️ Stampa Report
             </button>
         </header>
-
-        <section id="syncSection" class="mb-8 bg-blue-50 border border-blue-200 p-6 rounded-xl shadow-sm flex flex-col md:flex-row items-center justify-between gap-6">
-            <div class="flex-1">
-                <h2 class="text-lg font-semibold text-blue-800 mb-2">Sincronizza i tuoi dispositivi</h2>
-                <p class="text-sm text-blue-600 mb-4">Inquadra il QR Code con lo smartphone oppure apri il link seguente per accedere ai tuoi dati da un altro dispositivo. Nessuna registrazione richiesta.</p>
-                <input type="text" id="shareLink" readonly class="w-full bg-white border border-blue-300 rounded px-3 py-2 text-sm font-mono focus:outline-none focus:ring-1 focus:ring-blue-500 cursor-text">
-            </div>
-            <div id="qrcode" class="bg-white p-2 rounded shadow-sm border border-blue-200 min-w-[128px] min-h-[128px]"></div>
-        </section>
 
         <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
             
@@ -108,7 +101,7 @@
 
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
-        import { getFirestore, doc, setDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+        import { getFirestore, collection, doc, setDoc, deleteDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 
         const firebaseConfig = {
             apiKey: "AIzaSyA10LxfhhWXjWZMvKu8us8PJEaIiP8LFhE",
@@ -119,44 +112,10 @@
             appId: "1:696917853011:web:9fe6738205b18b723e57a6"
         };
 
-        // Gestione ID Utente Anonimo
-        function getOrCreateUserId() {
-            const urlParams = new URLSearchParams(window.location.search);
-            const urlId = urlParams.get('id');
-            
-            if (urlId) {
-                localStorage.setItem('pesoAppUserId', urlId);
-                window.history.replaceState({}, document.title, window.location.pathname);
-                return urlId;
-            }
-            
-            let localId = localStorage.getItem('pesoAppUserId');
-            if (!localId) {
-                localId = Math.random().toString(36).substring(2, 10);
-                localStorage.setItem('pesoAppUserId', localId);
-            }
-            return localId;
-        }
-
-        const userId = getOrCreateUserId();
-        document.getElementById('userIdDisplay').textContent = userId;
-
-        // Gestione Link e QR Code
-        const currentUrlBase = window.location.origin + window.location.pathname;
-        const shareUrl = `${currentUrlBase}?id=${userId}`;
-        document.getElementById('shareLink').value = shareUrl;
-        new QRCode(document.getElementById("qrcode"), {
-            text: shareUrl,
-            width: 128,
-            height: 128,
-            colorDark: "#1e3a8a",
-            colorLight: "#ffffff"
-        });
-
         // Inizializza Firebase e Firestore
         const app = initializeApp(firebaseConfig);
         const db = getFirestore(app);
-        const userDocRef = doc(db, "app_weights_data", userId);
+        const weightCollection = collection(db, "weights");
 
         // Stato locale
         let weightRecords = [];
@@ -199,13 +158,12 @@
             }
         });
 
-        // Ascolto dati Cloud in tempo reale per lo specifico utente
-        onSnapshot(userDocRef, (docSnap) => {
-            if (docSnap.exists()) {
-                weightRecords = docSnap.data().records || [];
-            } else {
-                weightRecords = [];
-            }
+        // Ascolto dati Cloud in tempo reale
+        onSnapshot(weightCollection, (snapshot) => {
+            weightRecords = [];
+            snapshot.forEach((doc) => {
+                weightRecords.push(doc.data());
+            });
             updateUI();
         });
 
@@ -219,7 +177,7 @@
 
             historyTableBody.innerHTML = '';
             if (recentRecords.length === 0) {
-                statusState.textContent = "Nessun dato registrato. Inserisci il tuo primo peso.";
+                statusState.textContent = "Nessun dato registrato sul cloud. Inserisci il tuo primo peso!";
                 statusState.classList.remove('hidden');
             } else {
                 statusState.classList.add('hidden');
@@ -230,7 +188,7 @@
                         <td class="py-3 px-4 border-b text-sm font-medium text-gray-700">${formatDate(record.date)}</td>
                         <td class="py-3 px-4 border-b text-sm text-gray-600">${record.weight.toFixed(1)} kg</td>
                         <td class="py-3 px-4 border-b text-sm text-right delete-btn">
-                            <button data-date="${record.date}" class="text-red-600 hover:text-red-800 font-medium transition duration-150">
+                            <button data-date="${record.date}" class="delete-btn text-red-600 hover:text-red-800 font-medium transition duration-150">
                                 Elimina
                             </button>
                         </td>
@@ -240,7 +198,7 @@
 
                 document.querySelectorAll('.delete-btn button').forEach(btn => {
                     btn.addEventListener('click', (e) => {
-                        const dateToDelete = e.target.getAttribute('data-date');
+                        const dateToDelete = e.target.closest('button').getAttribute('data-date');
                         deleteRecord(dateToDelete);
                     });
                 });
@@ -260,37 +218,30 @@
 
             if (isNaN(weight) || weight <= 0) return;
 
-            const newRecord = { date, weight };
-            let updatedRecords = [...weightRecords];
-            const existingIndex = updatedRecords.findIndex(r => r.date === date);
-
-            if (existingIndex !== -1) {
+            const existing = weightRecords.find(r => r.date === date);
+            if (existing) {
                 const confirmOverwrite = confirm(`Esiste già un record per il ${formatDate(date)}. Vuoi sovrascriverlo?`);
                 if (!confirmOverwrite) return;
-                updatedRecords[existingIndex] = newRecord;
-            } else {
-                updatedRecords.push(newRecord);
             }
 
             try {
-                await setDoc(userDocRef, { records: updatedRecords });
+                await setDoc(doc(db, "weights", date), { date, weight });
                 weightInput.value = '';
             } catch (error) {
-                alert("Errore di rete durante il salvataggio.");
+                alert("Errore cloud: " + error.message);
             }
         });
 
         // Eliminazione dal Cloud
-        window.deleteRecord = async function(date) {
+        async function deleteRecord(date) {
             if (confirm(`Eliminare la registrazione del ${formatDate(date)}?`)) {
-                let updatedRecords = weightRecords.filter(r => r.date !== date);
                 try {
-                    await setDoc(userDocRef, { records: updatedRecords });
+                    await deleteDoc(doc(db, "weights", date));
                 } catch (error) {
-                    alert("Errore di rete durante l'eliminazione.");
+                    alert("Errore cloud: " + error.message);
                 }
             }
-        };
+        }
     </script>
 </body>
 </html>
